@@ -1,6 +1,8 @@
 ﻿#include "Core/ArkanoidGameState.h"
+#include "Core/ArkanoidGameMode.h"
 #include "Engine/LevelStreaming.h" 
-#include "Bonuses/ArkanoidBonus.h" 
+#include "Bonuses/ArkanoidBonus.h"
+#include "Actor/ArkanoidBricks.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
@@ -152,6 +154,52 @@ void AArkanoidGameState::StopAutoPhaseSwitching()
 {
     GetWorldTimerManager().ClearTimer(TimerHandle_PhaseSwitch);
     UE_LOG(LogTemp, Warning, TEXT("Auto-Switcher STOPPED."));
+}
+
+bool AArkanoidGameState::DoesPhaseHaveBricks(TSoftObjectPtr<UWorld> PhaseAsset)
+{
+    if (PhaseAsset.IsNull()) return false;
+
+    UWorld* World = GetWorld();
+    if (!World) return false;
+
+    // Имя, которое ищем (например "Sublevel_PhaseB")
+    FString TargetName = PhaseAsset.GetAssetName();
+
+    // 1. Перебираем все загруженные стриминг-уровни
+    const TArray<ULevelStreaming*>& StreamingLevels = World->GetStreamingLevels();
+
+    for (ULevelStreaming* StreamLevel : StreamingLevels)
+    {
+        if (!StreamLevel) continue;
+
+        // Проверяем, тот ли это уровень по имени
+        FString PkgName = StreamLevel->GetWorldAssetPackageName();
+        if (PkgName.Contains(TargetName))
+        {
+            // 2. Получаем сам объект уровня (ULevel)
+            ULevel* LoadedLevel = StreamLevel->GetLoadedLevel();
+            
+            // Если уровень не загружен — кирпичей точно нет
+            if (!LoadedLevel) return false;
+
+            // 3. ПРЯМОЙ ПЕРЕБОР АКТОРОВ В ЭТОМ УРОВНЕ
+            // Мы не зависим от BeginPlay, мы смотрим, что лежит в файле прямо сейчас.
+            for (AActor* Actor : LoadedLevel->Actors)
+            {
+                // Проверяем: валиден ли актор, не удаляется ли он, и является ли он Кирпичом
+                if (Actor && !Actor->IsPendingKillPending() && Actor->IsA(AArkanoidBricks::StaticClass()))
+                {
+                    // Нашли хотя бы один кирпич!
+                    // Значит, в этот уровень можно переключаться.
+                    return true; 
+                }
+            }
+        }
+    }
+
+    // Если ничего не нашли
+    return false;
 }
 
 void AArkanoidGameState::OnPhaseTimerTick()

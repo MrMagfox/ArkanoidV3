@@ -1,11 +1,9 @@
 ﻿/**
  * @file ArkanoidBall.cpp
  * @brief Реализация логики поведения мяча.
- * * В данном файле настроена физика полета, отскоки и фиксация в одной плоскости (XY).
  */
 
-#include "ArkanoidV3/Public/Actor/ArkanoidBall.h"
-
+#include "Actor/ArkanoidBall.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "TimerManager.h"
@@ -13,231 +11,231 @@
 #include "Bonuses/ArkanoidBonus_Speed.h" 
 #include "Bonuses/ArkanoidBonus_Size.h"
 
-/**
- * Конструктор мяча. 
- * Здесь настраиваются компоненты, которые будут созданы автоматически при спавне актора.
- */
+// --- ДОБАВЬ ЭТОТ ИНКЛЮД, ЧТОБЫ ВИДЕТЬ КЛАСС PADDLE ---
+#include "Pawn/ArkanoidPaddle.h" 
+// -----------------------------------------------------
+
 AArkanoidBall::AArkanoidBall()
 {
-	// Отключаем стандартный Tick, так как все движение обрабатывается внутри ProjectileMovementComponent
-	PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = false;
 
-	// --- ИНИЦИАЛИЗАЦИЯ МЕША (ВИЗУАЛ + КОЛЛИЗИЯ) ---
-	BallMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BallMesh"));
-	RootComponent = BallMesh;
+    BallMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BallMesh"));
+    RootComponent = BallMesh;
+    BallMesh->SetCollisionProfileName(TEXT("BlockAllDynamic")); 
+    BallMesh->SetSimulatePhysics(false);
+    BallMesh->SetEnableGravity(false);
+    BallMesh->SetUseCCD(true);
+    BallMesh->bTraceComplexOnMove = true;
 
-	// Настройка профиля коллизии. 'Projectile' или 'BlockAllDynamic' подходят лучше всего.
-	BallMesh->SetCollisionProfileName(TEXT("BlockAllDynamic")); 
-	
-	// ВАЖНО: Отключаем симуляцию физики движка (PhysX/Chaos), чтобы ProjectileMovement полностью контролировал движение.
-	BallMesh->SetSimulatePhysics(false);
-	BallMesh->SetEnableGravity(false);
-
-	/**
-	 * ПРЕДОТВРАЩЕНИЕ ПРОЛЕТА СКВОЗЬ ОБЪЕКТЫ:
-	 * bUseCCD (Continuous Collision Detection) — заставляет движок проверять столкновения 
-	 * не только в точках А и Б, но и на всем пути следования между кадрами.
-	 */
-	BallMesh->SetUseCCD(true);
-	BallMesh->bTraceComplexOnMove = true;
-
-	// --- НАСТРОЙКА КОМПОНЕНТА ДВИЖЕНИЯ ---
-	ProjectileMovement = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("ProjectileMovement"));
-	
-	// Настройка отскоков
-	ProjectileMovement->bShouldBounce = true;
-	ProjectileMovement->Bounciness = 1.0f; // Эластичность 1.0 = мяч не теряет энергию при ударе
-	ProjectileMovement->Friction = 0.0f;   // Трение 0 = мяч не застревает на поверхностях
-	
-	// Прочие параметры движения
-	ProjectileMovement->ProjectileGravityScale = 0.0f; // Никакой гравитации
-	ProjectileMovement->InitialSpeed = 0.0f;           // Ждем команды Launch
-	ProjectileMovement->MaxSpeed = MaxSpeed;           // Ограничение из заголовочного файла
-
-	/**
-	 * СИСТЕМА SWEEP:
-	 * Обязательно включаем, чтобы ProjectileMovement проверял столкновения при перемещении.
-	 */
-	ProjectileMovement->bSweepCollision = true;
-
-	/**
-	 * ПЛОСКОЕ ДВИЖЕНИЕ (2D в 3D):
-	 * Блокируем ось Z, чтобы мяч никогда не подпрыгивал вверх и не падал вниз.
-	 */
-	ProjectileMovement->bConstrainToPlane = true;
-	ProjectileMovement->SetPlaneConstraintNormal(FVector(0.0f, 0.0f, 1.0f)); // Блокируем вектор (0,0,1)
+    ProjectileMovement = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("ProjectileMovement"));
+    ProjectileMovement->bShouldBounce = true;
+    ProjectileMovement->Bounciness = 1.0f; 
+    ProjectileMovement->Friction = 0.0f;   
+    ProjectileMovement->ProjectileGravityScale = 0.0f; 
+    ProjectileMovement->InitialSpeed = 0.0f;           
+    ProjectileMovement->MaxSpeed = MaxSpeed;           
+    ProjectileMovement->bSweepCollision = true;
+    ProjectileMovement->bConstrainToPlane = true;
+    ProjectileMovement->SetPlaneConstraintNormal(FVector(0.0f, 0.0f, 1.0f)); 
 }
 
-/**
- * Вызывается при запуске игры.
- */
 void AArkanoidBall::BeginPlay()
 {
-	Super::BeginPlay();
-	
-	// Подписываемся на делегат отскока, чтобы изменять скорость или играть звуки
-	if (ProjectileMovement)
-	{
-		ProjectileMovement->OnProjectileBounce.AddDynamic(this, &AArkanoidBall::OnBounce);
-	}
+    Super::BeginPlay();
+    
+    if (ProjectileMovement)
+    {
+       ProjectileMovement->OnProjectileBounce.AddDynamic(this, &AArkanoidBall::OnBounce);
+    }
 }
 
-/**
- * Запуск мяча. Вызывается из каретки (Paddle).
- * @param Direction Направление, куда полетит мяч.
- */
 void AArkanoidBall::Launch(FVector Direction)
 {
-	// Отрываем мяч от иерархии каретки, чтобы он двигался независимо в мировом пространстве
-	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+    DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 
-	if (ProjectileMovement)
-	{
-		// Устанавливаем вектор скорости (Направление * Скорость)
-		ProjectileMovement->Velocity = Direction.GetSafeNormal() * MinSpeed;
-		
-		// Активируем компонент, если он был деактивирован
-		ProjectileMovement->Activate();
-	}
+    if (ProjectileMovement)
+    {
+       ProjectileMovement->Velocity = Direction.GetSafeNormal() * MinSpeed;
+       ProjectileMovement->Activate();
+    }
 }
 
-/**
- * Обработка события отскока.
- */
+// Функция обработки отскока мяча от объектов
 void AArkanoidBall::OnBounce(const FHitResult& ImpactResult, const FVector& ImpactVelocity)
 {
-	if (!ProjectileMovement) return;
+    if (!ProjectileMovement) return;
 
-	// Измеряем текущую скорость мяча
-	float CurrentSpeed = ProjectileMovement->Velocity.Size();
-	
-	// Увеличиваем скорость (SpeedMultiplierOnBounce) и зажимаем в пределах [MinSpeed, MaxSpeed]
-	float NewSpeed = FMath::Clamp(CurrentSpeed * SpeedMultiplierOnBounce, MinSpeed, MaxSpeed);
+    float CurrentSpeed = ProjectileMovement->Velocity.Size();
+    float NewSpeed = FMath::Clamp(CurrentSpeed * SpeedMultiplierOnBounce, MinSpeed, MaxSpeed);
+    
+    bool bIsCurveApplied = false;
+    AActor* HitActor = ImpactResult.GetActor();
 
-	// Сохраняем направление после отскока и применяем новую скорость
-	ProjectileMovement->Velocity = ProjectileMovement->Velocity.GetSafeNormal() * NewSpeed;
+    // ПРОВЕРКА НА КАРЕТКУ
+    if (HitActor && HitActor->IsA(AArkanoidPaddle::StaticClass()))
+    {
+        // 1. Кастим к нашему классу, чтобы достать RealVelocity
+        AArkanoidPaddle* Paddle = Cast<AArkanoidPaddle>(HitActor);
+        
+        // Берем НАШУ рассчитанную скорость
+        FVector PaddleVel = Paddle ? Paddle->GetRealVelocity() : FVector::ZeroVector;
+
+        // Проверяем скорость (порог 10.0f достаточно, чтобы отсеять шум)
+        if (PaddleVel.SizeSquared() > 100.0f) 
+        {
+            // === ЛОГИКА ПОДКРУТКИ (FRICTION) ===
+            // Если каретка едет вправо -> мяч получает пинок вправо.
+            
+            float FrictionFactor = 0.6f; // Сила подкрутки (0.5 = 50% от скорости каретки)
+
+            FVector BallDir = ProjectileMovement->Velocity;
+            
+            // Добавляем скорость каретки к поперечной скорости мяча (Y)
+            BallDir.Y += PaddleVel.Y * FrictionFactor;
+            
+            // Важно: Гарантируем, что мяч летит ВПЕРЕД (по X), чтобы не застрял внутри каретки
+            BallDir.X = FMath::Abs(BallDir.X); 
+
+            // Применяем
+            ProjectileMovement->Velocity = BallDir.GetSafeNormal() * NewSpeed;
+            
+            bIsCurveApplied = true;
+            UE_LOG(LogTemp, Warning, TEXT(">>> Moving Hit! Added Speed: %f"), PaddleVel.Y);
+        }
+        else
+        {
+            // === КАРЕТКА СТОИТ (или движется очень медленно) ===
+            // Используем логику "Куда попал":
+            // Удар в центр -> Прямо. Удар в край -> В бок.
+            
+            FVector PaddleOrigin = HitActor->GetActorLocation();
+            FVector HitPoint = ImpactResult.ImpactPoint;
+            float OffsetY = HitPoint.Y - PaddleOrigin.Y;
+            
+            // Коэффициент угла от края (чем больше, тем сильнее угол при ударе краем стоячей каретки)
+            float AngleStrength = 2.0f; 
+
+            FVector BallDir = ProjectileMovement->Velocity;
+            BallDir.Y += OffsetY * AngleStrength; // Смещаем угол
+            BallDir.X = FMath::Abs(BallDir.X);    // Всегда вперед
+
+            ProjectileMovement->Velocity = BallDir.GetSafeNormal() * NewSpeed;
+        }
+    }
+    else
+    {
+        // СТЕНЫ / КИРПИЧИ
+        ProjectileMovement->Velocity = ProjectileMovement->Velocity.GetSafeNormal() * NewSpeed;
+    }
+
+    // ОТРИСОВКА (Зеленый = Движение, Красный = Стоя)
+    if (bShowTrajectoryDebug && GetWorld())
+    {
+        FVector Start = ImpactResult.ImpactPoint;
+        FVector End = Start + (ProjectileMovement->Velocity.GetSafeNormal() * 300.0f);
+        DrawDebugLine(GetWorld(), Start, End, bIsCurveApplied ? FColor::Green : FColor::Red, false, 2.0f, 0, 2.0f);
+    }
 }
+
+// ... Остальные функции (ApplySpeedBuff, ResetSpeed, SizeBuff, ResetSize) без изменений ...
 
 void AArkanoidBall::ApplySpeedBuff(float SpeedMultiplier, float BuffDurationInSeconds)
 {
-	if (!ProjectileMovement) return;
+    if (!ProjectileMovement) return;
 
-	// ДЕБАГ: Выводим старые значения
-	if (GEngine) 
-	{
-		FString StartMsg = FString::Printf(TEXT("BALL START: OldMax=%f, Multiplier=%f"), MaxSpeed, SpeedMultiplier);
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::White, StartMsg);
-	}
+    if (GEngine) 
+    {
+       FString StartMsg = FString::Printf(TEXT("BALL START: OldMax=%f, Multiplier=%f"), MaxSpeed, SpeedMultiplier);
+       GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::White, StartMsg);
+    }
 
-	GetWorld()->GetTimerManager().ClearTimer(TimerHandle_SpeedBuff);
+    GetWorld()->GetTimerManager().ClearTimer(TimerHandle_SpeedBuff);
 
-	if (CachedBaseMaxSpeed <= 0.0f)
-	{
-		CachedBaseMaxSpeed = MaxSpeed;
-		CachedBaseMinSpeed = MinSpeed;
-	}
+    if (CachedBaseMaxSpeed <= 0.0f)
+    {
+       CachedBaseMaxSpeed = MaxSpeed;
+       CachedBaseMinSpeed = MinSpeed;
+    }
 
-	float NewMaxSpeed = CachedBaseMaxSpeed * SpeedMultiplier;
-	float NewMinSpeed = CachedBaseMinSpeed * SpeedMultiplier;
+    float NewMaxSpeed = CachedBaseMaxSpeed * SpeedMultiplier;
+    float NewMinSpeed = CachedBaseMinSpeed * SpeedMultiplier;
 
-	MaxSpeed = NewMaxSpeed;
-	MinSpeed = NewMinSpeed;
-	ProjectileMovement->MaxSpeed = NewMaxSpeed;
+    MaxSpeed = NewMaxSpeed;
+    MinSpeed = NewMinSpeed;
+    ProjectileMovement->MaxSpeed = NewMaxSpeed;
 
-	// Расчет новой скорости
-	float CurrentVelocityMag = ProjectileMovement->Velocity.Size();
-	float TargetSpeed = CurrentVelocityMag * SpeedMultiplier;
-	TargetSpeed = FMath::Clamp(TargetSpeed, MinSpeed, MaxSpeed);
+    float CurrentVelocityMag = ProjectileMovement->Velocity.Size();
+    float TargetSpeed = CurrentVelocityMag * SpeedMultiplier;
+    TargetSpeed = FMath::Clamp(TargetSpeed, MinSpeed, MaxSpeed);
 
-	ProjectileMovement->Velocity = ProjectileMovement->Velocity.GetSafeNormal() * TargetSpeed;
+    ProjectileMovement->Velocity = ProjectileMovement->Velocity.GetSafeNormal() * TargetSpeed;
 
-	// ДЕБАГ: Выводим результат
-	if (GEngine)
-	{
-		FString EndMsg = FString::Printf(TEXT("BALL RESULT: NewMax=%f, NewRealSpeed=%f"), MaxSpeed, ProjectileMovement->Velocity.Size());
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Magenta, EndMsg);
-	}
+    if (GEngine)
+    {
+       FString EndMsg = FString::Printf(TEXT("BALL RESULT: NewMax=%f, NewRealSpeed=%f"), MaxSpeed, ProjectileMovement->Velocity.Size());
+       GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Magenta, EndMsg);
+    }
 
-	GetWorld()->GetTimerManager().SetTimer(TimerHandle_SpeedBuff, this, &AArkanoidBall::ResetSpeedToNormal, BuffDurationInSeconds, false);
-	// Сообщаем GameState, что активирован бонус СКОРОСТИ
-	if (AArkanoidGameState* GS = GetWorld()->GetGameState<AArkanoidGameState>())
-	{
-		GS->StartBonusTimer(AArkanoidBonus_Speed::StaticClass(), BuffDurationInSeconds);
-	}
+    GetWorld()->GetTimerManager().SetTimer(TimerHandle_SpeedBuff, this, &AArkanoidBall::ResetSpeedToNormal, BuffDurationInSeconds, false);
+    
+    if (AArkanoidGameState* GS = GetWorld()->GetGameState<AArkanoidGameState>())
+    {
+       GS->StartBonusTimer(AArkanoidBonus_Speed::StaticClass(), BuffDurationInSeconds);
+    }
 }
 
 void AArkanoidBall::ResetSpeedToNormal()
 {
-	if (!ProjectileMovement) return;
+    if (!ProjectileMovement) return;
 
-	// 1. Возвращаем базовые настройки переменным
-	MaxSpeed = CachedBaseMaxSpeed;
-	MinSpeed = CachedBaseMinSpeed;
+    MaxSpeed = CachedBaseMaxSpeed;
+    MinSpeed = CachedBaseMinSpeed;
+    ProjectileMovement->MaxSpeed = MaxSpeed;
 
-	// 2. Возвращаем настройки компоненту
-	ProjectileMovement->MaxSpeed = MaxSpeed;
-
-	// 3. Корректируем текущую скорость мяча, если она вышла за пределы вернувшихся рамок
-	float CurrentVelocityMag = ProjectileMovement->Velocity.Size();
+    float CurrentVelocityMag = ProjectileMovement->Velocity.Size();
     
-	// Если мяч летит слишком быстро (после ускорения) -> замедляем
-	if (CurrentVelocityMag > MaxSpeed)
-	{
-		ProjectileMovement->Velocity = ProjectileMovement->Velocity.GetSafeNormal() * MaxSpeed;
-	}
-	// Если мяч летит слишком медленно (после замедления) -> ускоряем
-	else if (CurrentVelocityMag < MinSpeed)
-	{
-		ProjectileMovement->Velocity = ProjectileMovement->Velocity.GetSafeNormal() * MinSpeed;
-	}
+    if (CurrentVelocityMag > MaxSpeed)
+    {
+       ProjectileMovement->Velocity = ProjectileMovement->Velocity.GetSafeNormal() * MaxSpeed;
+    }
+    else if (CurrentVelocityMag < MinSpeed)
+    {
+       ProjectileMovement->Velocity = ProjectileMovement->Velocity.GetSafeNormal() * MinSpeed;
+    }
 
-	// Сбрасываем кэш (флаг того, что бафф закончился)
-	CachedBaseMaxSpeed = 0.0f;
-	CachedBaseMinSpeed = 0.0f;
-
-	UE_LOG(LogTemp, Warning, TEXT("BONUS END: Speed reset to normal."));
+    CachedBaseMaxSpeed = 0.0f;
+    CachedBaseMinSpeed = 0.0f;
+    UE_LOG(LogTemp, Warning, TEXT("BONUS END: Speed reset to normal."));
 }
 
 void AArkanoidBall::ApplySizeBuff(float SizeMultiplier, float BuffDuration)
 {
-	// Сбрасываем таймер (если бонус взят повторно)
-	GetWorld()->GetTimerManager().ClearTimer(TimerHandle_SizeBuff);
+    GetWorld()->GetTimerManager().ClearTimer(TimerHandle_SizeBuff);
 
-	// Кэшируем исходный размер (ТОЛЬКО если это первый активный бонус размера)
-	if (CachedBaseScale.IsZero())
-	{
-		CachedBaseScale = GetActorScale3D();
-	}
+    if (CachedBaseScale.IsZero())
+    {
+       CachedBaseScale = GetActorScale3D();
+    }
 
-	// Вычисляем новый размер (Исходный * Множитель)
-	// Важно умножать именно ИСХОДНЫЙ, чтобы бонусы не перемножались в бесконечность (2*2*2...)
-	FVector NewScale = CachedBaseScale * SizeMultiplier;
+    FVector NewScale = CachedBaseScale * SizeMultiplier;
+    SetActorScale3D(NewScale);
 
-	// Применяем масштаб
-	SetActorScale3D(NewScale);
+    UE_LOG(LogTemp, Warning, TEXT("BONUS: Size x%f! New Scale: %s"), SizeMultiplier, *NewScale.ToString());
 
-	UE_LOG(LogTemp, Warning, TEXT("BONUS: Size x%f! New Scale: %s"), SizeMultiplier, *NewScale.ToString());
+    GetWorld()->GetTimerManager().SetTimer(TimerHandle_SizeBuff, this, &AArkanoidBall::ResetSizeToNormal, BuffDuration, false);
 
-	//Запускаем таймер возврата
-	GetWorld()->GetTimerManager().SetTimer(TimerHandle_SizeBuff, this, &AArkanoidBall::ResetSizeToNormal, BuffDuration, false);
-
-	// Сообщаем GameState, что активирован бонус РАЗМЕРА МЯЧА
-	if (AArkanoidGameState* GS = GetWorld()->GetGameState<AArkanoidGameState>())
-	{
-		GS->StartBonusTimer(AArkanoidBonus_Size::StaticClass(), BuffDuration);
-	}
+    if (AArkanoidGameState* GS = GetWorld()->GetGameState<AArkanoidGameState>())
+    {
+       GS->StartBonusTimer(AArkanoidBonus_Size::StaticClass(), BuffDuration);
+    }
 }
 
 void AArkanoidBall::ResetSizeToNormal()
 {
-	// Возвращаем как было
-	if (!CachedBaseScale.IsZero())
-	{
-		SetActorScale3D(CachedBaseScale);
-	}
-
-	// Сбрасываем кэш
-	CachedBaseScale = FVector::ZeroVector;
-
-	UE_LOG(LogTemp, Warning, TEXT("BONUS END: Size reset."));
+    if (!CachedBaseScale.IsZero())
+    {
+       SetActorScale3D(CachedBaseScale);
+    }
+    CachedBaseScale = FVector::ZeroVector;
+    UE_LOG(LogTemp, Warning, TEXT("BONUS END: Size reset."));
 }

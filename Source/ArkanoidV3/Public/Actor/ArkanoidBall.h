@@ -36,6 +36,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arkanoid | Physics")
 	float MaxSpeed = 2500.0f;
 
+	/** Показать линии траектории отскока? */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arkanoid | Debug")
+	bool bShowTrajectoryDebug = true;
+
 	// --- функции ---
 	UFUNCTION(BlueprintCallable, Category = "Arkanoid | Actions")
 	void Launch(FVector Direction);

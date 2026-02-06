@@ -79,6 +79,10 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "Arkanoid | Phase System")
     TSoftObjectPtr<UWorld> CurrentActiveAsset;
 
+    // Возвращает true, если в указанной фазе есть живые кирпичи. 
+    UFUNCTION(BlueprintPure, Category = "Arkanoid | Phase System")
+    bool DoesPhaseHaveBricks(TSoftObjectPtr<UWorld> PhaseAsset);
+
 protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Arkanoid | Stats")
     int32 CurrentScore;

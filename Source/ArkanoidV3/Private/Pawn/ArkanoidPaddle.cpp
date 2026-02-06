@@ -26,6 +26,7 @@ AArkanoidPaddle::AArkanoidPaddle()
     bIsBallLaunched = false;
     MovementLimit = 450.0f; 
     MoveSpeed = 1000.0f;
+    MouseSensitivity = 1.5f; // Дефолтная чувствительность
 }
 
 void AArkanoidPaddle::BeginPlay()
@@ -34,6 +35,11 @@ void AArkanoidPaddle::BeginPlay()
 
     if (APlayerController* PC = Cast<APlayerController>(Controller))
     {
+       // --- MOUSE UPDATE: Скрываем курсор и захватываем управление ---
+       PC->bShowMouseCursor = false;
+       PC->SetInputMode(FInputModeGameOnly());
+       // -------------------------------------------------------------
+
        if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
        {
           if (DefaultMappingContext)
@@ -42,14 +48,27 @@ void AArkanoidPaddle::BeginPlay()
           }
        }
     }
-	// Запоминаем скорость, которую настроил в Блюпринте как "Нормальную"
-	CachedBaseMoveSpeed = MoveSpeed;
+    CachedBaseMoveSpeed = MoveSpeed;
+	LastFrameLocation = GetActorLocation();
+	RealVelocity = FVector::ZeroVector;
     RespawnBall();
 }
 
 void AArkanoidPaddle::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+	FVector CurrentLocation = GetActorLocation();
+
+	if (DeltaTime > 0.0f)
+	{
+		// Формула скорости: (Текущая позиция - Старая позиция) / Время
+		RealVelocity = (CurrentLocation - LastFrameLocation) / DeltaTime;
+	}
+
+	// Запоминаем для следующего кадра
+	LastFrameLocation = CurrentLocation;
+	// ДЕБАГ: 
+	 if (!RealVelocity.IsZero()) UE_LOG(LogTemp, Warning, TEXT("Speed: %s"), *RealVelocity.ToString());
 }
 
 void AArkanoidPaddle::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -57,35 +76,60 @@ void AArkanoidPaddle::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
     Super::SetupPlayerInputComponent(PlayerInputComponent);
     if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
     {
+       // Клавиатура (старое)
        if (MoveAction)
           EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AArkanoidPaddle::Move);
        
+       // Запуск (старое)
        if (LaunchAction)
           EnhancedInputComponent->BindAction(LaunchAction, ETriggerEvent::Started, this, &AArkanoidPaddle::LaunchBall);
+
+       // --- MOUSE UPDATE: Новая привязка ---
+       if (MouseMoveAction)
+          EnhancedInputComponent->BindAction(MouseMoveAction, ETriggerEvent::Triggered, this, &AArkanoidPaddle::OnMouseMove);
     }
 }
 
+// Движение клавиатурой (зависит от DeltaTime и MoveSpeed)
 void AArkanoidPaddle::Move(const FInputActionValue& Value)
 {
-	float AxisValue = Value.Get<float>();
+    float AxisValue = Value.Get<float>();
 
-	if (Controller && (AxisValue != 0.0f))
-	{
-		// --- ЛОГИКА ИНВЕРСИИ ---
-		float DirectionMultiplier = bIsControlInverted ? -1.0f : 1.0f;
+    if (Controller && (AxisValue != 0.0f))
+    {
+       float DirectionMultiplier = bIsControlInverted ? -1.0f : 1.0f;
+       float MoveOffset = AxisValue * MoveSpeed * DirectionMultiplier * GetWorld()->GetDeltaSeconds();
         
-		// ВАЖНО: Добавляем * DirectionMultiplier в формулу!
-		float MoveOffset = AxisValue * MoveSpeed * DirectionMultiplier * GetWorld()->GetDeltaSeconds();
-        
-		FVector CurrentLoc = GetActorLocation();
-		float NewY = CurrentLoc.Y + MoveOffset;
+       FVector CurrentLoc = GetActorLocation();
+       float NewY = CurrentLoc.Y + MoveOffset;
 
-		// CLAMP
-		NewY = FMath::Clamp(NewY, -MovementLimit, MovementLimit);
+       NewY = FMath::Clamp(NewY, -MovementLimit, MovementLimit);
+       SetActorLocation(FVector(CurrentLoc.X, NewY, CurrentLoc.Z));
+    }
+}
 
-		FVector NewLocation = FVector(CurrentLoc.X, NewY, CurrentLoc.Z);
-		SetActorLocation(NewLocation);
-	}
+// --- MOUSE UPDATE: Движение мышью ---
+void AArkanoidPaddle::OnMouseMove(const FInputActionValue& Value)
+{
+    float MouseDelta = Value.Get<float>();
+
+    if (Controller && (MouseDelta != 0.0f))
+    {
+        // Учет инверсии (если бонус активен)
+        float DirectionMultiplier = bIsControlInverted ? -1.0f : 1.0f;
+
+        // Расчет смещения: Дельта (пиксели) * Чувствительность
+        // Здесь НЕ умножаем на DeltaTime, так как Input Action Axis уже возвращает дельту за кадр
+        float MoveOffset = MouseDelta * MouseSensitivity * DirectionMultiplier;
+
+        FVector CurrentLoc = GetActorLocation();
+        float NewY = CurrentLoc.Y + MoveOffset;
+
+        // Ограничение перемещения
+        NewY = FMath::Clamp(NewY, -MovementLimit, MovementLimit);
+
+        SetActorLocation(FVector(CurrentLoc.X, NewY, CurrentLoc.Z));
+    }
 }
 
 void AArkanoidPaddle::LaunchBall()
@@ -111,128 +155,68 @@ void AArkanoidPaddle::RespawnBall()
        SpawnParams.Owner = this;
        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-       // Спавним в точке SpawnPoint
        CurrentBall = GetWorld()->SpawnActor<AArkanoidBall>(BallClass, BallSpawnPoint->GetComponentTransform(), SpawnParams);
 
        if (CurrentBall)
        {
-          // ВАЖНО: Используем KeepWorldScale, чтобы мяч не наследовал масштаб родителей вообще
           CurrentBall->AttachToComponent(BallSpawnPoint, FAttachmentTransformRules::KeepWorldTransform);
-          
-          // Сбрасываем локальную позицию и поворот мяча в 0 (относительно точки спавна), но масштаб оставляем (1,1,1)
           CurrentBall->SetActorRelativeLocation(FVector::ZeroVector);
           CurrentBall->SetActorRelativeRotation(FRotator::ZeroRotator);
        }
     }
-
     bIsBallLaunched = false;
 }
 
-
-
+// ... Остальные функции бонусов без изменений ...
 void AArkanoidPaddle::ApplyPaddleSizeBuff(FVector ScaleMultiplier, float DurationSec)
 {
     GetWorldTimerManager().ClearTimer(TimerHandle_SizeBuff);
-
-    // Берем масштаб именно МЕША, а не актора
-    if (CachedBaseScale.IsZero())
-    {
-       CachedBaseScale = PaddleMesh->GetRelativeScale3D();
-    }
-
+    if (CachedBaseScale.IsZero()) CachedBaseScale = PaddleMesh->GetRelativeScale3D();
     FVector NewScale = CachedBaseScale * ScaleMultiplier;
-
-    // Применяем масштаб только к МЕШУ
     PaddleMesh->SetRelativeScale3D(NewScale);
-
     UE_LOG(LogTemp, Warning, TEXT("PADDLE BONUS: New Mesh Scale %s"), *NewScale.ToString());
-
     GetWorldTimerManager().SetTimer(TimerHandle_SizeBuff, this, &AArkanoidPaddle::ResetPaddleScale, DurationSec, false);
-    
     if (AArkanoidGameState* GS = GetWorld()->GetGameState<AArkanoidGameState>())
-    {
        GS->StartBonusTimer(AArkanoidBonus_PaddleSize::StaticClass(), DurationSec);
-    }
 }
 
 void AArkanoidPaddle::ResetPaddleScale()
 {
-	if (!CachedBaseScale.IsZero())
-	{
-		// Возвращаем масштаб МЕША
-		PaddleMesh->SetRelativeScale3D(CachedBaseScale);
-	}
-
-	CachedBaseScale = FVector::ZeroVector;
-    
-	UE_LOG(LogTemp, Warning, TEXT("PADDLE BONUS END: Size reset."));
+    if (!CachedBaseScale.IsZero()) PaddleMesh->SetRelativeScale3D(CachedBaseScale);
+    CachedBaseScale = FVector::ZeroVector;
+    UE_LOG(LogTemp, Warning, TEXT("PADDLE BONUS END: Size reset."));
 }
 
 void AArkanoidPaddle::ApplyInvertControl(float DurationSec)
 {
-	// 1. Сбрасываем старый таймер (продлеваем время)
-	GetWorldTimerManager().ClearTimer(TimerHandle_Invert);
-
-	// 2. Включаем режим "Наоборот"
-	bIsControlInverted = true;
-
-	UE_LOG(LogTemp, Warning, TEXT("BONUS: Controls INVERTED!"));
-
-	// 3. Запускаем таймер отключения
-	GetWorldTimerManager().SetTimer(TimerHandle_Invert, this, &AArkanoidPaddle::ResetInvertControl, DurationSec, false);
-
-	// 4. Отправляем в UI
-	if (AArkanoidGameState* GS = GetWorld()->GetGameState<AArkanoidGameState>())
-	{
-		// Используем класс бонуса (мы создадим его ниже)
-		// Если компилятор ругается, пока можно закомментировать строку с GS, 
-		// а раскомментировать после создания класса ArkanoidBonus_Invert
-		GS->StartBonusTimer(AArkanoidBonus_Invert::StaticClass(), DurationSec);
-	}
+    GetWorldTimerManager().ClearTimer(TimerHandle_Invert);
+    bIsControlInverted = true;
+    UE_LOG(LogTemp, Warning, TEXT("BONUS: Controls INVERTED!"));
+    GetWorldTimerManager().SetTimer(TimerHandle_Invert, this, &AArkanoidPaddle::ResetInvertControl, DurationSec, false);
+    if (AArkanoidGameState* GS = GetWorld()->GetGameState<AArkanoidGameState>())
+       GS->StartBonusTimer(AArkanoidBonus_Invert::StaticClass(), DurationSec);
 }
 
 void AArkanoidPaddle::ResetInvertControl()
 {
-	bIsControlInverted = false;
-	UE_LOG(LogTemp, Warning, TEXT("BONUS END: Controls Normal."));
+    bIsControlInverted = false;
+    UE_LOG(LogTemp, Warning, TEXT("BONUS END: Controls Normal."));
 }
 
 void AArkanoidPaddle::ApplyPaddleSpeedBuff(float SpeedMultiplier, float Duration)
 {
-	// Сбрасываем таймер
-	GetWorldTimerManager().ClearTimer(TimerHandle_PaddleSpeed);
-
-	// Если вдруг база не записалась (страховка), пишем сейчас
-	if (CachedBaseMoveSpeed <= 0.0f)
-	{
-		CachedBaseMoveSpeed = MoveSpeed;
-	}
-
-	// Считаем новую скорость от БАЗОВОЙ (чтобы бонусы не перемножались грязно)
-	float NewSpeed = CachedBaseMoveSpeed * SpeedMultiplier;
-	MoveSpeed = NewSpeed;
-
-	UE_LOG(LogTemp, Warning, TEXT("PADDLE SPEED: New Speed: %f"), MoveSpeed);
-
-	// Таймер на возврат
-	GetWorldTimerManager().SetTimer(TimerHandle_PaddleSpeed, this, &AArkanoidPaddle::ResetPaddleSpeed, Duration, false);
-
-	// UI Таймер
-	if (AArkanoidGameState* GS = GetWorld()->GetGameState<AArkanoidGameState>())
-	{
-		// Передаем класс бонуса скорости (создадим его ниже)
-		GS->StartBonusTimer(AArkanoidBonus_PaddleSpeed::StaticClass(), Duration);
-	}
+    GetWorldTimerManager().ClearTimer(TimerHandle_PaddleSpeed);
+    if (CachedBaseMoveSpeed <= 0.0f) CachedBaseMoveSpeed = MoveSpeed;
+    float NewSpeed = CachedBaseMoveSpeed * SpeedMultiplier;
+    MoveSpeed = NewSpeed;
+    UE_LOG(LogTemp, Warning, TEXT("PADDLE SPEED: New Speed: %f"), MoveSpeed);
+    GetWorldTimerManager().SetTimer(TimerHandle_PaddleSpeed, this, &AArkanoidPaddle::ResetPaddleSpeed, Duration, false);
+    if (AArkanoidGameState* GS = GetWorld()->GetGameState<AArkanoidGameState>())
+       GS->StartBonusTimer(AArkanoidBonus_PaddleSpeed::StaticClass(), Duration);
 }
 
 void AArkanoidPaddle::ResetPaddleSpeed()
 {
-	// Возвращаем как было
-	if (CachedBaseMoveSpeed > 0.0f)
-	{
-		MoveSpeed = CachedBaseMoveSpeed;
-	}
-    
-	UE_LOG(LogTemp, Warning, TEXT("PADDLE SPEED END: Reset to %f"), MoveSpeed);
+    if (CachedBaseMoveSpeed > 0.0f) MoveSpeed = CachedBaseMoveSpeed;
+    UE_LOG(LogTemp, Warning, TEXT("PADDLE SPEED END: Reset to %f"), MoveSpeed);
 }
-
