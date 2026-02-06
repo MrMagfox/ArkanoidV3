@@ -1,3 +1,18 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:2a5103cc6c654da3fea998f8c97f830500b9d29947e41bed62c80393fb6cf515
-size 456
+﻿#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/SaveGame.h"
+#include "ArkanoidSaveGame.generated.h"
+
+UCLASS()
+class ARKANOIDV3_API UArkanoidSaveGame : public USaveGame
+{
+	GENERATED_BODY()
+
+public:
+	UArkanoidSaveGame();
+
+	/** Номер максимального уровня, который доступен игроку (1, 2, 3...) */
+	UPROPERTY(VisibleAnywhere, Category = "SaveData")
+	int32 MaxUnlockedLevelIndex;
+};

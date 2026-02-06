@@ -1,3 +1,30 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:c3d1a0913185ba92b602c181039e461d71811e6798d7949f1c0724311bc35211
-size 811
+﻿
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/HUD.h"
+#include "ArkanoidHUD.generated.h"
+
+
+UCLASS()
+class ARKANOIDV3_API AArkanoidHUD : public AHUD
+{
+	GENERATED_BODY()
+
+protected:
+	virtual void BeginPlay() override;
+
+public:
+	// --- НАСТРОЙКИ ---
+
+	/** Класс виджета, который мы хотим создать (выбираем WBP_GameHUD в блюпринте) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Arkanoid | UI")
+	TSubclassOf<UUserWidget> GameWidgetClass;
+
+	// --- СОСТОЯНИЕ ---
+
+	/** Ссылка на созданный виджет, чтобы мы могли к нему обращаться */
+	UPROPERTY(BlueprintReadOnly, Category = "Arkanoid | UI")
+	TObjectPtr<UUserWidget> GameWidget;
+};

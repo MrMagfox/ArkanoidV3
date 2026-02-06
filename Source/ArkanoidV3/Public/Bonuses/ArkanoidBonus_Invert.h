@@ -1,3 +1,20 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:37827e16d0bf810c090dac55dbdb2e7cbbafdc8fcd5964bb7afb47fcc681456a
-size 573
+﻿#pragma once
+
+#include "CoreMinimal.h"
+#include "Bonuses/ArkanoidBonus.h"
+#include "ArkanoidBonus_Invert.generated.h"
+
+
+UCLASS()
+class ARKANOIDV3_API AArkanoidBonus_Invert : public AArkanoidBonus
+{
+	GENERATED_BODY()
+	
+public:
+	/** Время действия дебаффа */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arkanoid | Bonus Logic")
+	float Duration = 5.0f; // Пусть действует недолго, это же сложно!
+
+protected:
+	virtual void ActivateBonusEffect(class AArkanoidPaddle* PlayerPawn) override;
+};

@@ -1,3 +1,31 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:4983e265eb576d1ec5fb74ac5ae717ebb615c9efc261fe0170c6df1058861277
-size 878
+﻿// Fill out your copyright notice in the Description page of Project Settings.
+
+
+#include "Bonuses/ArkanoidBonus_Speed.h"
+#include "Pawn/ArkanoidPaddle.h"
+#include "Actor/ArkanoidBall.h"
+
+
+
+
+
+void AArkanoidBonus_Speed::ActivateBonusEffect(AArkanoidPaddle* PlayerPawn)
+{
+	Super::ActivateBonusEffect(PlayerPawn);
+
+	if (!PlayerPawn) return;
+
+	AArkanoidBall* CurrentBall = PlayerPawn->GetCurrentBall();
+
+	if (CurrentBall)
+	{
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan, TEXT("Скорость увеличена!"));
+        
+		CurrentBall->ApplySpeedBuff(SpeedMultiplier, EffectDuration);
+	}
+	else
+	{
+		// ОШИБКА: Бонус взят, но мяч не найден
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Ошибка в ArkanoidBonus_Speed: мяч не найден!"));
+	}
+}

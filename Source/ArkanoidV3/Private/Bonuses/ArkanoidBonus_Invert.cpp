@@ -1,3 +1,19 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:441411f0cfa68e51d6b4e3127ecc73c946336cda5441c569bdfd597647347277
-size 459
+﻿// Fill out your copyright notice in the Description page of Project Settings.
+
+
+#include "Bonuses/ArkanoidBonus_Invert.h"
+#include "Pawn/ArkanoidPaddle.h"
+
+void AArkanoidBonus_Invert::ActivateBonusEffect(AArkanoidPaddle* PlayerPawn)
+{
+	if (PlayerPawn)
+	{
+		PlayerPawn->ApplyInvertControl(Duration);
+        
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("CONFUSION! Controls Inverted!"));
+		}
+	}
+}
+

@@ -1,3 +1,28 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:5e1e3e733f08ebb9f03f44b4ee172ac487ffce796cb74e153c8503c303f2bafc
-size 849
+﻿// Fill out your copyright notice in the Description page of Project Settings.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "ArkanoidBonus.h"
+#include "ArkanoidBonus_Size.generated.h"
+
+UCLASS()
+class ARKANOIDV3_API AArkanoidBonus_Size : public AArkanoidBonus
+{
+	GENERATED_BODY()
+
+public:
+	/** * Множитель размера.
+	 * > 1.0 : Увеличение (например, 2.0)
+	 * < 1.0 : Уменьшение (например, 0.5)
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arkanoid | Bonus Logic")
+	float SizeMultiplier = 2.0f;
+
+	/** Время действия (сек) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arkanoid | Bonus Logic")
+	float EffectDuration = 10.0f;
+
+protected:
+	virtual void ActivateBonusEffect(class AArkanoidPaddle* PlayerPawn) override;
+};
